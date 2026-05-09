@@ -6,16 +6,17 @@ import {
   listSnapshots,
   snapshotTrips,
 } from "@/lib/db/queries";
-import { startRun } from "@/lib/search/runner";
+import { runSearchInline } from "@/lib/search/runner";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function GET(
   _request: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
-  const search = getSearch(id);
+  const search = await getSearch(id);
   if (!search) {
     return NextResponse.json(
       { ok: false, error: "Search not found" },
@@ -23,7 +24,7 @@ export async function GET(
     );
   }
   const input = JSON.parse(search.paramsJson);
-  const snapshots = listSnapshots(id);
+  const snapshots = await listSnapshots(id);
   return NextResponse.json({
     ok: true,
     search: {
@@ -48,13 +49,27 @@ export async function POST(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
-  const input = getSearchInput(id);
+  const input = await getSearchInput(id);
   if (!input) {
     return NextResponse.json(
       { ok: false, error: "Search not found" },
       { status: 404 },
     );
   }
-  const run = startRun(id, input);
-  return NextResponse.json({ ok: true, snapshotId: run.snapshotId });
+  try {
+    const result = await runSearchInline(id, input);
+    return NextResponse.json({
+      ok: true,
+      snapshotId: result.snapshotId,
+      tripCount: result.trips.length,
+    });
+  } catch (e) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: e instanceof Error ? e.message : "Refresh failed",
+      },
+      { status: 500 },
+    );
+  }
 }

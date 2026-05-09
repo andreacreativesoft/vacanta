@@ -5,7 +5,7 @@ import { listSearches, snapshotTrips } from "@/lib/db/queries";
 export const runtime = "nodejs";
 
 export async function GET() {
-  const rows = listSearches();
+  const rows = await listSearches();
   return NextResponse.json({
     ok: true,
     searches: rows.map(({ search, latest }) => ({

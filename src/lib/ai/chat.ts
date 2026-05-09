@@ -50,14 +50,18 @@ export async function handleChatTurn(
   const client = getClient();
 
   // Persist the user message immediately
-  const userRow = appendChatMessage({
+  const userRow = await appendChatMessage({
     id: ulid(),
     searchId: args.searchId ?? null,
     role: "user",
     contentJson: JSON.stringify({ text: args.message }),
   });
 
-  const history = buildAnthropicHistory(args.searchId, args.message, userRow.id);
+  const history = await buildAnthropicHistory(
+    args.searchId,
+    args.message,
+    userRow.id,
+  );
 
   let messages: AnthropicMessage[] = history;
   let finalText = "";
@@ -129,7 +133,7 @@ export async function handleChatTurn(
       "Sorry — I wasn't able to come up with a response. Try rephrasing or check the logs.";
   }
 
-  const assistantRow = appendChatMessage({
+  const assistantRow = await appendChatMessage({
     id: ulid(),
     searchId: args.searchId ?? null,
     role: "assistant",
@@ -147,14 +151,13 @@ export async function handleChatTurn(
   };
 }
 
-function buildAnthropicHistory(
+async function buildAnthropicHistory(
   searchId: string | null,
   newUserMessage: string,
   newUserMessageId: string,
-): AnthropicMessage[] {
-  const past = listChatMessages(searchId).filter(
-    (m) => m.id !== newUserMessageId,
-  );
+): Promise<AnthropicMessage[]> {
+  const all = await listChatMessages(searchId);
+  const past = all.filter((m) => m.id !== newUserMessageId);
   const messages: AnthropicMessage[] = [];
   for (const m of past) {
     if (m.role === "tool") continue; // tool messages are ephemeral; we skip replaying them

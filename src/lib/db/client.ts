@@ -2,9 +2,9 @@ import "server-only";
 
 import fs from "node:fs";
 import path from "node:path";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { createClient, type Client } from "@libsql/client";
+import { drizzle } from "drizzle-orm/libsql";
+import { migrate } from "drizzle-orm/libsql/migrator";
 
 import * as schema from "./schema";
 
@@ -12,13 +12,9 @@ type DrizzleDb = ReturnType<typeof drizzle<typeof schema>>;
 
 const globalForDb = globalThis as unknown as {
   __db?: DrizzleDb;
-  __sqlite?: Database.Database;
+  __libsql?: Client;
+  __migrated?: boolean;
 };
-
-function resolveDbPath(): string {
-  const raw = process.env.DATABASE_URL ?? "./data/vacation-finder.db";
-  return path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
-}
 
 function ensureDir(filePath: string) {
   const dir = path.dirname(filePath);
@@ -27,35 +23,63 @@ function ensureDir(filePath: string) {
   }
 }
 
-function createConnection() {
-  const dbPath = resolveDbPath();
-  ensureDir(dbPath);
-
-  const sqlite = new Database(dbPath);
-  sqlite.pragma("journal_mode = WAL");
-  sqlite.pragma("foreign_keys = ON");
-
-  const db = drizzle(sqlite, { schema });
-
-  const migrationsFolder = path.resolve(process.cwd(), "drizzle");
-  if (fs.existsSync(migrationsFolder)) {
-    try {
-      migrate(db, { migrationsFolder });
-    } catch (err) {
-      console.error("[db] migration failed", err);
-      throw err;
-    }
+function resolveConnection(): { url: string; authToken?: string } {
+  const remote = process.env.TURSO_DATABASE_URL;
+  if (remote) {
+    return { url: remote, authToken: process.env.TURSO_AUTH_TOKEN };
   }
+  const raw = process.env.DATABASE_URL ?? "./data/vacation-finder.db";
+  if (raw.startsWith("libsql://") || raw.startsWith("http")) {
+    return { url: raw, authToken: process.env.TURSO_AUTH_TOKEN };
+  }
+  if (raw.startsWith("file:")) {
+    const filePath = raw.replace(/^file:/, "");
+    if (!path.isAbsolute(filePath)) ensureDir(path.resolve(process.cwd(), filePath));
+    return { url: raw };
+  }
+  // Plain path — treat as a local SQLite file
+  const abs = path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+  ensureDir(abs);
+  return { url: `file:${abs}` };
+}
 
-  return { sqlite, db };
+function init(): { db: DrizzleDb; client: Client } {
+  const { url, authToken } = resolveConnection();
+  const client = createClient({ url, authToken });
+  const db = drizzle(client, { schema });
+  return { db, client };
 }
 
 if (!globalForDb.__db) {
-  const { sqlite, db } = createConnection();
+  const { db, client } = init();
   globalForDb.__db = db;
-  globalForDb.__sqlite = sqlite;
+  globalForDb.__libsql = client;
 }
 
 export const db = globalForDb.__db!;
-export const sqlite = globalForDb.__sqlite!;
+export const libsqlClient = globalForDb.__libsql!;
 export { schema };
+
+let migrationPromise: Promise<void> | null = null;
+
+export function ensureMigrated(): Promise<void> {
+  if (globalForDb.__migrated) return Promise.resolve();
+  if (migrationPromise) return migrationPromise;
+
+  const migrationsFolder = path.resolve(process.cwd(), "drizzle");
+  if (!fs.existsSync(migrationsFolder)) {
+    globalForDb.__migrated = true;
+    return Promise.resolve();
+  }
+
+  migrationPromise = migrate(db, { migrationsFolder })
+    .then(() => {
+      globalForDb.__migrated = true;
+    })
+    .catch((err) => {
+      migrationPromise = null;
+      console.error("[db] migration failed", err);
+      throw err;
+    });
+  return migrationPromise;
+}

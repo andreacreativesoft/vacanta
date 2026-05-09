@@ -10,8 +10,8 @@ import type { SearchInput } from "@/types";
 
 export const dynamic = "force-dynamic";
 
-export default function SearchesPage() {
-  const rows = listSearches();
+export default async function SearchesPage() {
+  const rows = await listSearches();
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10 space-y-4">

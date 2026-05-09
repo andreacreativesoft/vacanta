@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { RefreshCw, MessageSquare } from "lucide-react";
+import { RefreshCw, MessageSquare, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,7 +16,6 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { ProgressStream } from "@/components/progress-stream";
 import { ResultsList } from "@/components/results-list";
 import { ChatPanel } from "@/components/chat-panel";
 import { formatDate, formatDateTime, formatPrice } from "@/lib/format";
@@ -24,33 +23,22 @@ import { countryName } from "@/lib/airports/countries";
 import type {
   ChatMessage,
   SearchDetailDto,
-  SnapshotDto,
 } from "@/types/dto";
-import type { TripOption } from "@/types";
 
 export function SearchDetail({
   initial,
   initialChat,
-  initialSnapshotId,
 }: {
   initial: SearchDetailDto;
   initialChat: ChatMessage[];
-  initialSnapshotId: string | null;
 }) {
   const router = useRouter();
-  const [activeSnapshot, setActiveSnapshot] = React.useState<string | null>(
-    initialSnapshotId,
-  );
-  const [snapshots, setSnapshots] = React.useState<SnapshotDto[]>(
-    initial.snapshots,
-  );
   const [refreshing, setRefreshing] = React.useState(false);
-  const [streamingTrips, setStreamingTrips] = React.useState<TripOption[]>([]);
+  const snapshots = initial.snapshots;
 
   const params = initial.search.params;
   const latest = snapshots[0];
-  const displayedTrips =
-    streamingTrips.length > 0 ? streamingTrips : (latest?.trips ?? []);
+  const trips = latest?.trips ?? [];
 
   async function refresh() {
     setRefreshing(true);
@@ -59,35 +47,19 @@ export function SearchDetail({
         method: "POST",
       });
       const data = (await res.json()) as
-        | { ok: true; snapshotId: string }
+        | { ok: true; snapshotId: string; tripCount: number }
         | { ok: false; error: string };
       if (!res.ok || !("ok" in data) || !data.ok) {
         toast.error("error" in data ? data.error : "Refresh failed");
         return;
       }
-      setActiveSnapshot(data.snapshotId);
-      setStreamingTrips([]);
-      // Optimistically prepend a "running" snapshot
-      setSnapshots((s) => [
-        {
-          id: data.snapshotId,
-          status: "running",
-          startedAt: new Date().toISOString(),
-          completedAt: null,
-          errorMessage: null,
-          trips: [],
-        },
-        ...s,
-      ]);
+      toast.success(`Refreshed — ${data.tripCount} trips`);
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Network error");
     } finally {
       setRefreshing(false);
     }
-  }
-
-  function onDoneStreaming() {
-    router.refresh();
   }
 
   return (
@@ -127,9 +99,17 @@ export function SearchDetail({
               variant="outline"
               size="sm"
               onClick={refresh}
-              disabled={refreshing || latest?.status === "running"}
+              disabled={refreshing}
             >
-              <RefreshCw className="size-4" /> Refresh
+              {refreshing ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" /> Searching…
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="size-4" /> Refresh
+                </>
+              )}
             </Button>
             <Sheet>
               <SheetTrigger asChild>
@@ -154,16 +134,15 @@ export function SearchDetail({
         </CardHeader>
       </Card>
 
-      {activeSnapshot && (
-        <ProgressStream
-          searchId={initial.search.id}
-          snapshotId={activeSnapshot}
-          onPartial={(trips) => setStreamingTrips(trips)}
-          onDone={onDoneStreaming}
-        />
+      {latest?.status === "error" && (
+        <Card className="border-destructive/50 bg-destructive/5">
+          <CardContent className="py-3 text-sm text-destructive">
+            Search failed: {latest.errorMessage ?? "unknown error"}
+          </CardContent>
+        </Card>
       )}
 
-      <ResultsList trips={displayedTrips} />
+      <ResultsList trips={trips} />
 
       {snapshots.length > 0 && (
         <Card>
@@ -197,7 +176,7 @@ export function SearchDetail({
                           s.trips[0].totalPrice,
                           s.trips[0].currency,
                         )}`
-                      : s.errorMessage ?? "—"}
+                      : (s.errorMessage ?? "—")}
                   </div>
                 </li>
               ))}

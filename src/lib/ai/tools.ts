@@ -7,7 +7,7 @@ import {
   listSnapshots,
   snapshotTrips,
 } from "@/lib/db/queries";
-import { startRun } from "@/lib/search/runner";
+import { runSearchInline } from "@/lib/search/runner";
 import { formatDate, formatPrice } from "@/lib/format";
 
 export const TOOL_DEFINITIONS = [
@@ -37,7 +37,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: "refresh_search",
     description:
-      "Re-run an existing saved search with current prices. Returns the new snapshot id; results stream in the UI.",
+      "Re-run an existing saved search to get current prices. Blocks until complete (up to ~60s).",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -90,8 +90,8 @@ export async function executeTool(
   }
 }
 
-function toolListSearches(limit: number): ToolResult {
-  const rows = listSearches(limit);
+async function toolListSearches(limit: number): Promise<ToolResult> {
+  const rows = await listSearches(limit);
   return {
     ok: true,
     data: rows.map(({ search, latest }) => {
@@ -133,11 +133,12 @@ function toolListSearches(limit: number): ToolResult {
   };
 }
 
-function toolGetSearchDetails(searchId: string): ToolResult {
-  const search = getSearch(searchId);
+async function toolGetSearchDetails(searchId: string): Promise<ToolResult> {
+  const search = await getSearch(searchId);
   if (!search) return { ok: false, error: "Search not found" };
   const params = JSON.parse(search.paramsJson);
-  const snapshots = listSnapshots(searchId).map((s) => ({
+  const snapshotRows = await listSnapshots(searchId);
+  const snapshots = snapshotRows.map((s) => ({
     snapshotId: s.id,
     status: s.status,
     startedAt: s.startedAt.toISOString(),
@@ -167,43 +168,56 @@ function toolGetSearchDetails(searchId: string): ToolResult {
   };
 }
 
-function toolRefreshSearch(searchId: string): ToolResult {
-  const input = getSearchInput(searchId);
+async function toolRefreshSearch(searchId: string): Promise<ToolResult> {
+  const input = await getSearchInput(searchId);
   if (!input) return { ok: false, error: "Search not found" };
-  const run = startRun(searchId, input);
-  return {
-    ok: true,
-    data: {
-      snapshotId: run.snapshotId,
-      message:
-        "Refresh started. Watch the search page for live progress; results will appear in a new snapshot.",
-    },
-  };
+  try {
+    const result = await runSearchInline(searchId, input);
+    return {
+      ok: true,
+      data: {
+        snapshotId: result.snapshotId,
+        tripCount: result.trips.length,
+        cheapest: result.trips[0]
+          ? {
+              destination: result.trips[0].destinationCity,
+              totalPrice: result.trips[0].totalPrice,
+              currency: result.trips[0].currency,
+            }
+          : null,
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "refresh failed" };
+  }
 }
 
-function toolCompareTrips(searchIds: string[]): ToolResult {
+async function toolCompareTrips(searchIds: string[]): Promise<ToolResult> {
   if (searchIds.length === 0) {
     return { ok: false, error: "Provide at least one searchId" };
   }
-  const rows = searchIds.map((sid) => {
-    const search = getSearch(sid);
-    if (!search) return { searchId: sid, error: "not found" };
-    const latest = listSnapshots(sid)[0];
-    const trips = snapshotTrips(latest);
-    return {
-      searchId: sid,
-      label: search.label,
-      params: JSON.parse(search.paramsJson),
-      latestSnapshotAt: latest?.startedAt.toISOString() ?? null,
-      cheapestTrip: trips[0]
-        ? {
-            destination: `${trips[0].destinationCity}, ${trips[0].destinationCountry}`,
-            totalPrice: trips[0].totalPrice,
-            currency: trips[0].currency,
-            formatted: formatPrice(trips[0].totalPrice, trips[0].currency),
-          }
-        : null,
-    };
-  });
+  const rows = await Promise.all(
+    searchIds.map(async (sid) => {
+      const search = await getSearch(sid);
+      if (!search) return { searchId: sid, error: "not found" };
+      const snapshots = await listSnapshots(sid);
+      const latest = snapshots[0];
+      const trips = snapshotTrips(latest);
+      return {
+        searchId: sid,
+        label: search.label,
+        params: JSON.parse(search.paramsJson),
+        latestSnapshotAt: latest?.startedAt.toISOString() ?? null,
+        cheapestTrip: trips[0]
+          ? {
+              destination: `${trips[0].destinationCity}, ${trips[0].destinationCountry}`,
+              totalPrice: trips[0].totalPrice,
+              currency: trips[0].currency,
+              formatted: formatPrice(trips[0].totalPrice, trips[0].currency),
+            }
+          : null,
+      };
+    }),
+  );
   return { ok: true, data: rows };
 }

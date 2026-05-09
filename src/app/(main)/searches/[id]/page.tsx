@@ -18,18 +18,15 @@ export const dynamic = "force-dynamic";
 
 export default async function SearchDetailPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ snapshot?: string }>;
 }) {
   const { id } = await params;
-  const { snapshot: snapshotQuery } = await searchParams;
 
-  const search = getSearch(id);
+  const search = await getSearch(id);
   if (!search) notFound();
 
-  const snapshotRows = listSnapshots(id);
+  const snapshotRows = await listSnapshots(id);
   const snapshots: SnapshotDto[] = snapshotRows.map((s) => ({
     id: s.id,
     status: s.status,
@@ -49,7 +46,7 @@ export default async function SearchDetailPage({
     snapshots,
   };
 
-  const chatRows = listChatMessages(id);
+  const chatRows = await listChatMessages(id);
   const initialChat: ChatMessage[] = chatRows.map((m) => ({
     id: m.id,
     role: m.role,
@@ -57,18 +54,7 @@ export default async function SearchDetailPage({
     createdAt: m.createdAt.toISOString(),
   }));
 
-  const initialSnapshotId =
-    snapshotQuery ??
-    snapshots.find((s) => s.status === "running")?.id ??
-    null;
-
-  return (
-    <SearchDetail
-      initial={detail}
-      initialChat={initialChat}
-      initialSnapshotId={initialSnapshotId}
-    />
-  );
+  return <SearchDetail initial={detail} initialChat={initialChat} />;
 }
 
 function extractText(json: string): string {

@@ -6,94 +6,39 @@ import {
   failSnapshot,
 } from "@/lib/db/queries";
 import { runSearch } from "./orchestrator";
-import type { ProgressEvent, SearchInput, TripOption } from "@/types";
+import type { SearchInput, TripOption } from "@/types";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("runner");
 
-type Subscriber = (event: ProgressEvent) => void;
-
-type RunState = {
-  snapshotId: string;
+export type RunInlineResult = {
   searchId: string;
-  events: ProgressEvent[];
-  subscribers: Set<Subscriber>;
-  done: boolean;
+  snapshotId: string;
   trips: TripOption[];
-  error?: string;
 };
 
-const globalForRuns = globalThis as unknown as {
-  __runs?: Map<string, RunState>;
-};
-if (!globalForRuns.__runs) {
-  globalForRuns.__runs = new Map<string, RunState>();
-}
-const runs = globalForRuns.__runs!;
+/**
+ * Run a search synchronously: create a snapshot, execute, persist results, return.
+ * Designed to fit inside a single serverless invocation (≤ Vercel maxDuration).
+ * Live progress streaming is intentionally dropped for serverless compatibility.
+ */
+export async function runSearchInline(
+  searchId: string,
+  input: SearchInput,
+): Promise<RunInlineResult> {
+  const snapshot = await createSnapshot(searchId);
 
-export function getRun(snapshotId: string): RunState | undefined {
-  return runs.get(snapshotId);
-}
+  // Discard progress events; we only persist the final snapshot.
+  const emit = () => {};
 
-export function startRun(searchId: string, input: SearchInput): RunState {
-  const snapshot = createSnapshot(searchId);
-  const state: RunState = {
-    snapshotId: snapshot.id,
-    searchId,
-    events: [],
-    subscribers: new Set(),
-    done: false,
-    trips: [],
-  };
-  runs.set(snapshot.id, state);
-
-  const emit = (event: ProgressEvent) => {
-    state.events.push(event);
-    for (const sub of state.subscribers) {
-      try {
-        sub(event);
-      } catch (err) {
-        log.warn("subscriber failed", err);
-      }
-    }
-  };
-
-  // fire-and-forget background execution
-  void (async () => {
-    try {
-      const trips = await runSearch(input, emit);
-      state.trips = trips;
-      completeSnapshot(snapshot.id, trips);
-      emit({
-        type: "done",
-        searchId,
-        snapshotId: snapshot.id,
-      });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      log.error("run failed", e);
-      state.error = message;
-      failSnapshot(snapshot.id, message);
-      emit({ type: "error", message });
-    } finally {
-      state.done = true;
-      // Keep state around briefly so late subscribers can read final events
-      setTimeout(() => {
-        runs.delete(snapshot.id);
-      }, 60_000);
-    }
-  })();
-
-  return state;
-}
-
-export function subscribe(snapshotId: string, sub: Subscriber): () => void {
-  const state = runs.get(snapshotId);
-  if (!state) return () => {};
-  for (const evt of state.events) {
-    sub(evt);
+  try {
+    const trips = await runSearch(input, emit);
+    await completeSnapshot(snapshot.id, trips);
+    return { searchId, snapshotId: snapshot.id, trips };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    log.error("inline run failed", e);
+    await failSnapshot(snapshot.id, message);
+    throw e;
   }
-  if (state.done) return () => {};
-  state.subscribers.add(sub);
-  return () => state.subscribers.delete(sub);
 }
