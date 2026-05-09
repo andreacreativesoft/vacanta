@@ -14,7 +14,7 @@ export default async function SearchesPage() {
   const rows = await listSearches();
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10 space-y-4">
+    <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-10 space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Saved searches</h1>

@@ -63,11 +63,11 @@ export function SearchDetail({
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8 space-y-6">
+    <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8 space-y-6">
       <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-4">
-          <div>
-            <CardTitle className="text-xl">
+        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
+            <CardTitle className="text-lg sm:text-xl break-words">
               {initial.search.label ??
                 `${params.destinationCountries.map(countryName).join(", ")} · ${formatDate(params.dateWindowStart)} – ${formatDate(params.dateWindowEnd)}`}
             </CardTitle>
@@ -94,7 +94,7 @@ export function SearchDetail({
               )}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <Button
               variant="outline"
               size="sm"

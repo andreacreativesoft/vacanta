@@ -1,10 +1,52 @@
 "use client";
 
+import * as React from "react";
+
 import { TripCard } from "@/components/trip-card";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { TripOption } from "@/types";
 
+type SortKey = "price-asc" | "price-desc" | "date-asc" | "date-desc";
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "price-asc", label: "Price: low → high" },
+  { value: "price-desc", label: "Price: high → low" },
+  { value: "date-asc", label: "Departure: earliest" },
+  { value: "date-desc", label: "Departure: latest" },
+];
+
+function sortTrips(trips: TripOption[], key: SortKey): TripOption[] {
+  const out = [...trips];
+  switch (key) {
+    case "price-asc":
+      return out.sort((a, b) => a.totalPrice - b.totalPrice);
+    case "price-desc":
+      return out.sort((a, b) => b.totalPrice - a.totalPrice);
+    case "date-asc":
+      return out.sort((a, b) =>
+        a.flight.outbound.departureTime.localeCompare(
+          b.flight.outbound.departureTime,
+        ),
+      );
+    case "date-desc":
+      return out.sort((a, b) =>
+        b.flight.outbound.departureTime.localeCompare(
+          a.flight.outbound.departureTime,
+        ),
+      );
+  }
+}
+
 export function ResultsList({ trips }: { trips: TripOption[] }) {
+  const [sort, setSort] = React.useState<SortKey>("price-asc");
+
   if (trips.length === 0) {
     return (
       <Card>
@@ -14,9 +56,30 @@ export function ResultsList({ trips }: { trips: TripOption[] }) {
       </Card>
     );
   }
+
+  const sorted = sortTrips(trips, sort);
+
   return (
     <div className="space-y-4">
-      {trips.map((trip, i) => (
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm text-muted-foreground">
+          {trips.length} {trips.length === 1 ? "trip" : "trips"}
+        </p>
+        <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
+          <SelectTrigger size="sm" className="w-auto">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SORT_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {sorted.map((trip, i) => (
         <TripCard
           key={`${trip.destinationAirport}-${trip.flight.outbound.departureTime}`}
           trip={trip}

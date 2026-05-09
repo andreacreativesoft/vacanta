@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
+import { NumberInput } from "@/components/ui/number-input";
 import {
   Select,
   SelectContent,
@@ -231,24 +232,22 @@ export function SearchForm() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="min-days">Minimum nights</Label>
-              <Input
+              <NumberInput
                 id="min-days"
-                type="number"
                 min={1}
                 max={60}
                 value={minDays}
-                onChange={(e) => setMinDays(parseInt(e.target.value, 10) || 1)}
+                onValueChange={setMinDays}
               />
             </div>
             <div className="space-y-2">
               <Label htmlFor="max-days">Maximum nights</Label>
-              <Input
+              <NumberInput
                 id="max-days"
-                type="number"
                 min={1}
                 max={60}
                 value={maxDays}
-                onChange={(e) => setMaxDays(parseInt(e.target.value, 10) || 1)}
+                onValueChange={setMaxDays}
               />
             </div>
           </div>
@@ -263,15 +262,12 @@ export function SearchForm() {
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-2">
               <Label htmlFor="adults">Adults (16+)</Label>
-              <Input
+              <NumberInput
                 id="adults"
-                type="number"
                 min={1}
                 max={9}
                 value={adults}
-                onChange={(e) =>
-                  setAdults(Math.max(1, parseInt(e.target.value, 10) || 1))
-                }
+                onValueChange={setAdults}
               />
             </div>
             <div className="sm:col-span-2 space-y-2">
@@ -292,23 +288,20 @@ export function SearchForm() {
                 <div className="space-y-2">
                   {children.map((c) => (
                     <div key={c.id} className="flex items-center gap-2">
-                      <Input
-                        type="number"
+                      <NumberInput
                         min={0}
                         max={17}
                         value={c.age}
-                        onChange={(e) =>
+                        onValueChange={(age) =>
                           setChildren((cs) =>
                             cs.map((x) =>
-                              x.id === c.id
-                                ? { ...x, age: parseInt(e.target.value, 10) || 0 }
-                                : x,
+                              x.id === c.id ? { ...x, age } : x,
                             ),
                           )
                         }
-                        className="w-24"
+                        className="w-32 shrink-0"
                       />
-                      <span className="text-sm text-muted-foreground">
+                      <span className="text-sm text-muted-foreground flex-1 min-w-0 truncate">
                         years → {classifyAge(c.age)}
                       </span>
                       <Button
@@ -347,23 +340,14 @@ export function SearchForm() {
               >
                 <div className="space-y-1">
                   <Label className="text-xs">Adults</Label>
-                  <Input
-                    type="number"
+                  <NumberInput
                     min={1}
                     max={6}
                     value={r.adults}
-                    onChange={(e) =>
+                    onValueChange={(adults) =>
                       setRooms((rs) =>
                         rs.map((x, i) =>
-                          i === idx
-                            ? {
-                                ...x,
-                                adults: Math.max(
-                                  1,
-                                  parseInt(e.target.value, 10) || 1,
-                                ),
-                              }
-                            : x,
+                          i === idx ? { ...x, adults } : x,
                         ),
                       )
                     }
@@ -371,19 +355,15 @@ export function SearchForm() {
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Children</Label>
-                  <Input
-                    type="number"
+                  <NumberInput
                     min={0}
                     max={6}
                     value={r.children}
-                    onChange={(e) =>
+                    onValueChange={(c) =>
                       setRooms((rs) =>
                         rs.map((x, i) =>
                           i === idx
-                            ? {
-                                ...x,
-                                children: parseInt(e.target.value, 10) || 0,
-                              }
+                            ? { ...x, children: c }
                             : x,
                         ),
                       )
