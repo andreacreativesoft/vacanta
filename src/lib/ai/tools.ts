@@ -7,7 +7,7 @@ import {
   listSnapshots,
   snapshotTrips,
 } from "@/lib/db/queries";
-import { runSearchInline } from "@/lib/search/runner";
+import { startSnapshot } from "@/lib/search/runner";
 import { formatDate, formatPrice } from "@/lib/format";
 
 export const TOOL_DEFINITIONS = [
@@ -37,7 +37,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: "refresh_search",
     description:
-      "Re-run an existing saved search to get current prices. Blocks until complete (up to ~60s).",
+      "Queue a new snapshot for an existing saved search. Returns immediately; the user must open the search page to watch progress and see results.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -171,25 +171,15 @@ async function toolGetSearchDetails(searchId: string): Promise<ToolResult> {
 async function toolRefreshSearch(searchId: string): Promise<ToolResult> {
   const input = await getSearchInput(searchId);
   if (!input) return { ok: false, error: "Search not found" };
-  try {
-    const result = await runSearchInline(searchId, input);
-    return {
-      ok: true,
-      data: {
-        snapshotId: result.snapshotId,
-        tripCount: result.trips.length,
-        cheapest: result.trips[0]
-          ? {
-              destination: result.trips[0].destinationCity,
-              totalPrice: result.trips[0].totalPrice,
-              currency: result.trips[0].currency,
-            }
-          : null,
-      },
-    };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "refresh failed" };
-  }
+  const snapshot = await startSnapshot(searchId);
+  return {
+    ok: true,
+    data: {
+      snapshotId: snapshot.id,
+      message:
+        "Refresh queued. Open the search page to see live progress; results stream in over a few seconds.",
+    },
+  };
 }
 
 async function toolCompareTrips(searchIds: string[]): Promise<ToolResult> {

@@ -10,6 +10,7 @@ export type SearchDto = {
 export type SnapshotDto = {
   id: string;
   status: "running" | "complete" | "error";
+  phase: string | null;
   startedAt: string;
   completedAt: string | null;
   errorMessage: string | null;

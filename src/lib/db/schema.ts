@@ -16,6 +16,8 @@ export const searchResults = sqliteTable("search_results", {
     .notNull()
     .references(() => searches.id, { onDelete: "cascade" }),
   status: text("status", { enum: ["running", "complete", "error"] }).notNull(),
+  phase: text("phase"),
+  progressJson: text("progress_json"),
   resultsJson: text("results_json"),
   errorMessage: text("error_message"),
   startedAt: integer("started_at", { mode: "timestamp" })

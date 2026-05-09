@@ -16,14 +16,33 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { Progress } from "@/components/ui/progress";
 import { ResultsList } from "@/components/results-list";
 import { ChatPanel } from "@/components/chat-panel";
 import { formatDate, formatDateTime, formatPrice } from "@/lib/format";
 import { countryName } from "@/lib/airports/countries";
-import type {
-  ChatMessage,
-  SearchDetailDto,
-} from "@/types/dto";
+import type { ChatMessage, SearchDetailDto } from "@/types/dto";
+
+type StepResponse = {
+  ok: boolean;
+  done?: boolean;
+  phase?: string;
+  current?: number;
+  total?: number;
+  label?: string;
+  status?: "running" | "complete" | "error";
+  errorMessage?: string;
+  error?: string;
+};
+
+const PHASE_LABELS: Record<string, string> = {
+  init: "Starting…",
+  routes: "Resolving routes…",
+  pricing: "Pricing flights",
+  hotels: "Searching hotels",
+  complete: "Done",
+  error: "Error",
+};
 
 export function SearchDetail({
   initial,
@@ -34,33 +53,123 @@ export function SearchDetail({
 }) {
   const router = useRouter();
   const [refreshing, setRefreshing] = React.useState(false);
-  const snapshots = initial.snapshots;
 
   const params = initial.search.params;
-  const latest = snapshots[0];
-  const trips = latest?.trips ?? [];
+  const initialLatest = initial.snapshots[0];
+  const initialTrips = initialLatest?.trips ?? [];
+
+  const [activeSnapshotId, setActiveSnapshotId] = React.useState<string | null>(
+    initialLatest?.status === "running" ? initialLatest.id : null,
+  );
+  const [progress, setProgress] = React.useState<{
+    phase: string;
+    current: number;
+    total: number;
+    label: string;
+  } | null>(
+    initialLatest?.status === "running"
+      ? {
+          phase: initialLatest.phase ?? "init",
+          current: 0,
+          total: 1,
+          label: PHASE_LABELS[initialLatest.phase ?? "init"] ?? "Starting…",
+        }
+      : null,
+  );
+  const [errorMsg, setErrorMsg] = React.useState<string | null>(
+    initialLatest?.status === "error"
+      ? (initialLatest.errorMessage ?? "Search failed")
+      : null,
+  );
+
+  // Poll the step endpoint while a snapshot is running.
+  React.useEffect(() => {
+    if (!activeSnapshotId) return;
+    let cancelled = false;
+
+    async function tick() {
+      try {
+        const res = await fetch(
+          `/api/searches/${initial.search.id}/step?snapshot=${activeSnapshotId}`,
+          { method: "POST" },
+        );
+        const data = (await res.json()) as StepResponse;
+        if (cancelled) return;
+        if (!data.ok) {
+          setErrorMsg(data.error ?? "Step failed");
+          setActiveSnapshotId(null);
+          return;
+        }
+        setProgress({
+          phase: data.phase ?? "running",
+          current: data.current ?? 0,
+          total: data.total ?? 1,
+          label:
+            data.label ??
+            PHASE_LABELS[data.phase ?? "running"] ??
+            "Working…",
+        });
+        if (data.done || data.status !== "running") {
+          setActiveSnapshotId(null);
+          if (data.status === "error") {
+            setErrorMsg(data.errorMessage ?? "Search failed");
+          } else {
+            // refresh server data so the new snapshot's trips render
+            router.refresh();
+          }
+          return;
+        }
+        // Continue polling
+        setTimeout(tick, 50);
+      } catch (err) {
+        if (cancelled) return;
+        setErrorMsg(err instanceof Error ? err.message : "Network error");
+        setActiveSnapshotId(null);
+      }
+    }
+
+    void tick();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSnapshotId]);
 
   async function refresh() {
     setRefreshing(true);
+    setErrorMsg(null);
     try {
       const res = await fetch(`/api/searches/${initial.search.id}`, {
         method: "POST",
       });
       const data = (await res.json()) as
-        | { ok: true; snapshotId: string; tripCount: number }
+        | { ok: true; snapshotId: string }
         | { ok: false; error: string };
       if (!res.ok || !("ok" in data) || !data.ok) {
         toast.error("error" in data ? data.error : "Refresh failed");
         return;
       }
-      toast.success(`Refreshed — ${data.tripCount} trips`);
-      router.refresh();
+      setActiveSnapshotId(data.snapshotId);
+      setProgress({
+        phase: "init",
+        current: 0,
+        total: 1,
+        label: "Starting…",
+      });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Network error");
     } finally {
       setRefreshing(false);
     }
   }
+
+  const isRunning = activeSnapshotId !== null;
+  const trips = isRunning ? [] : initialTrips;
+  const snapshots = initial.snapshots;
+  const progressPct =
+    progress && progress.total > 0
+      ? Math.min(95, (progress.current / progress.total) * 100)
+      : 0;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8 space-y-6">
@@ -80,9 +189,7 @@ export function SearchDetail({
                 {params.passengers.length} pax
               </Badge>
               <Badge variant="outline">{params.currency}</Badge>
-              {params.filters.pool && (
-                <Badge variant="outline">Pool</Badge>
-              )}
+              {params.filters.pool && <Badge variant="outline">Pool</Badge>}
               {params.filters.allInclusive && (
                 <Badge variant="outline">All-inclusive</Badge>
               )}
@@ -99,9 +206,9 @@ export function SearchDetail({
               variant="outline"
               size="sm"
               onClick={refresh}
-              disabled={refreshing}
+              disabled={refreshing || isRunning}
             >
-              {refreshing ? (
+              {refreshing || isRunning ? (
                 <>
                   <Loader2 className="size-4 animate-spin" /> Searching…
                 </>
@@ -134,10 +241,27 @@ export function SearchDetail({
         </CardHeader>
       </Card>
 
-      {latest?.status === "error" && (
+      {isRunning && progress && (
+        <Card>
+          <CardContent className="space-y-2 py-4">
+            <div className="flex items-center gap-2 text-sm">
+              <Loader2 className="size-4 animate-spin text-primary" />
+              <span>{progress.label}</span>
+              {progress.total > 1 && (
+                <span className="text-muted-foreground">
+                  ({progress.current}/{progress.total})
+                </span>
+              )}
+            </div>
+            <Progress value={progressPct} />
+          </CardContent>
+        </Card>
+      )}
+
+      {errorMsg && (
         <Card className="border-destructive/50 bg-destructive/5">
           <CardContent className="py-3 text-sm text-destructive">
-            Search failed: {latest.errorMessage ?? "unknown error"}
+            {errorMsg}
           </CardContent>
         </Card>
       )}

@@ -3,11 +3,11 @@ import { ZodError } from "zod";
 
 import { searchInputSchema } from "@/lib/validation";
 import { createSearch } from "@/lib/db/queries";
-import { runSearchInline } from "@/lib/search/runner";
+import { startSnapshot } from "@/lib/search/runner";
 import type { SearchInput } from "@/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 10;
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -36,24 +36,11 @@ export async function POST(request: Request) {
   const { label, ...rest } = parsed;
   const input: SearchInput = rest;
   const search = await createSearch(input, label);
+  const snapshot = await startSnapshot(search.id);
 
-  try {
-    const result = await runSearchInline(search.id, input);
-    return NextResponse.json({
-      ok: true,
-      searchId: search.id,
-      snapshotId: result.snapshotId,
-      tripCount: result.trips.length,
-    });
-  } catch (e) {
-    return NextResponse.json(
-      {
-        ok: true,
-        searchId: search.id,
-        snapshotId: null,
-        error: e instanceof Error ? e.message : "Search failed",
-      },
-      { status: 200 },
-    );
-  }
+  return NextResponse.json({
+    ok: true,
+    searchId: search.id,
+    snapshotId: snapshot.id,
+  });
 }

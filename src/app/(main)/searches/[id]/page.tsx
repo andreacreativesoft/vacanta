@@ -30,6 +30,7 @@ export default async function SearchDetailPage({
   const snapshots: SnapshotDto[] = snapshotRows.map((s) => ({
     id: s.id,
     status: s.status,
+    phase: s.phase,
     startedAt: s.startedAt.toISOString(),
     completedAt: s.completedAt ? s.completedAt.toISOString() : null,
     errorMessage: s.errorMessage,

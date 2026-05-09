@@ -8,6 +8,13 @@
       "when": 1778340300960,
       "tag": "0000_absent_paper_doll",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1778350448329,
+      "tag": "0001_famous_ironclad",
+      "breakpoints": true
     }
   ]
 }

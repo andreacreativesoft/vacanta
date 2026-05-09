@@ -100,17 +100,36 @@ export async function getSnapshot(
   );
 }
 
-export async function createSnapshot(searchId: string): Promise<SearchResult> {
+export async function createSnapshot(
+  searchId: string,
+  initialState: object,
+): Promise<SearchResult> {
   await ensureMigrated();
   const row: NewSearchResult = {
     id: ulid(),
     searchId,
     status: "running",
+    phase: "init",
+    progressJson: JSON.stringify(initialState),
   };
   await db.insert(searchResults).values(row);
   const inserted = await getSnapshot(row.id);
   if (!inserted) throw new Error("Failed to create snapshot");
   return inserted;
+}
+
+export async function updateSnapshotProgress(
+  snapshotId: string,
+  phase: string,
+  progress: object,
+): Promise<void> {
+  await db
+    .update(searchResults)
+    .set({
+      phase,
+      progressJson: JSON.stringify(progress),
+    })
+    .where(eq(searchResults.id, snapshotId));
 }
 
 export async function completeSnapshot(
@@ -121,6 +140,7 @@ export async function completeSnapshot(
     .update(searchResults)
     .set({
       status: "complete",
+      phase: "complete",
       resultsJson: JSON.stringify(trips),
       completedAt: new Date(),
     })
@@ -135,6 +155,7 @@ export async function failSnapshot(
     .update(searchResults)
     .set({
       status: "error",
+      phase: "error",
       errorMessage: message,
       completedAt: new Date(),
     })

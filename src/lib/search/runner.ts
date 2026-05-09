@@ -4,41 +4,92 @@ import {
   completeSnapshot,
   createSnapshot,
   failSnapshot,
+  getSnapshot,
+  updateSnapshotProgress,
 } from "@/lib/db/queries";
-import { runSearch } from "./orchestrator";
-import type { SearchInput, TripOption } from "@/types";
+import { initialState, step, type SnapshotState } from "./step";
+import type { SearchInput } from "@/types";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("runner");
 
-export type RunInlineResult = {
-  searchId: string;
-  snapshotId: string;
-  trips: TripOption[];
-};
+export async function startSnapshot(searchId: string) {
+  const state = initialState();
+  return await createSnapshot(searchId, state);
+}
 
-/**
- * Run a search synchronously: create a snapshot, execute, persist results, return.
- * Designed to fit inside a single serverless invocation (≤ Vercel maxDuration).
- * Live progress streaming is intentionally dropped for serverless compatibility.
- */
-export async function runSearchInline(
-  searchId: string,
+export async function advanceSnapshot(
+  snapshotId: string,
   input: SearchInput,
-): Promise<RunInlineResult> {
-  const snapshot = await createSnapshot(searchId);
+): Promise<{
+  done: boolean;
+  phase: string;
+  current: number;
+  total: number;
+  label: string;
+  status: "running" | "complete" | "error";
+  errorMessage?: string;
+}> {
+  const snapshot = await getSnapshot(snapshotId);
+  if (!snapshot) throw new Error("Snapshot not found");
+  if (snapshot.status !== "running") {
+    return {
+      done: true,
+      phase: snapshot.phase ?? "complete",
+      current: 1,
+      total: 1,
+      label: snapshot.phase ?? "complete",
+      status: snapshot.status,
+      errorMessage: snapshot.errorMessage ?? undefined,
+    };
+  }
 
-  // Discard progress events; we only persist the final snapshot.
-  const emit = () => {};
+  let state: SnapshotState;
+  try {
+    state = JSON.parse(snapshot.progressJson ?? "{}") as SnapshotState;
+    if (!state.phase) state = initialState();
+  } catch {
+    state = initialState();
+  }
 
   try {
-    const trips = await runSearch(input, emit);
-    await completeSnapshot(snapshot.id, trips);
-    return { searchId, snapshotId: snapshot.id, trips };
+    const result = await step(input, state);
+    if (result.done) {
+      await completeSnapshot(snapshotId, result.state.trips);
+      return {
+        done: true,
+        phase: "complete",
+        current: result.current,
+        total: result.total,
+        label: result.label,
+        status: "complete",
+      };
+    }
+    await updateSnapshotProgress(
+      snapshotId,
+      result.state.phase,
+      result.state,
+    );
+    return {
+      done: false,
+      phase: result.state.phase,
+      current: result.current,
+      total: result.total,
+      label: result.label,
+      status: "running",
+    };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    log.error("inline run failed", e);
-    await failSnapshot(snapshot.id, message);
-    throw e;
+    log.error("step failed", e);
+    await failSnapshot(snapshotId, message);
+    return {
+      done: true,
+      phase: "error",
+      current: 0,
+      total: 0,
+      label: message,
+      status: "error",
+      errorMessage: message,
+    };
   }
 }

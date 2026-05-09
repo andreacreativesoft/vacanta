@@ -6,10 +6,10 @@ import {
   listSnapshots,
   snapshotTrips,
 } from "@/lib/db/queries";
-import { runSearchInline } from "@/lib/search/runner";
+import { startSnapshot } from "@/lib/search/runner";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 10;
 
 export async function GET(
   _request: Request,
@@ -36,6 +36,7 @@ export async function GET(
     snapshots: snapshots.map((s) => ({
       id: s.id,
       status: s.status,
+      phase: s.phase,
       startedAt: s.startedAt,
       completedAt: s.completedAt,
       errorMessage: s.errorMessage,
@@ -56,20 +57,6 @@ export async function POST(
       { status: 404 },
     );
   }
-  try {
-    const result = await runSearchInline(id, input);
-    return NextResponse.json({
-      ok: true,
-      snapshotId: result.snapshotId,
-      tripCount: result.trips.length,
-    });
-  } catch (e) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: e instanceof Error ? e.message : "Refresh failed",
-      },
-      { status: 500 },
-    );
-  }
+  const snapshot = await startSnapshot(id);
+  return NextResponse.json({ ok: true, snapshotId: snapshot.id });
 }
