@@ -174,9 +174,9 @@ function mockHotels(input: HotelSearchInput): HotelOption[] {
       distanceToBeachMeters: t.beach,
       isAllInclusive: t.ai,
       thumbnailUrl: undefined,
-      bookingDeepLink: `https://www.google.com/search?q=${encodeURIComponent(
-        `${cityWord} ${t.suffix} hotel`,
-      )}`,
+      bookingDeepLink: `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(
+        `${cityWord} ${t.suffix}`,
+      )}&checkin=${input.checkIn}&checkout=${input.checkOut}`,
     };
   });
 }

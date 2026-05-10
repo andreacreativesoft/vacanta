@@ -99,7 +99,7 @@ export function ResultsList({ trips }: { trips: TripOption[] }) {
 
       {sorted.map((trip, i) => (
         <TripCard
-          key={`${trip.destinationAirport}-${trip.flight.outbound.departureTime}`}
+          key={`${trip.destinationAirport}-${trip.flight.outbound.departureTime}-${trip.flight.inbound.departureTime}-${trip.hotel.hotelId}`}
           trip={trip}
           rank={i + 1}
         />
