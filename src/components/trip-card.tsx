@@ -7,6 +7,21 @@ import { Button } from "@/components/ui/button";
 import { formatDate, formatPrice } from "@/lib/format";
 import type { TripOption } from "@/types";
 
+type Carrier = "ryanair" | "wizzair" | "unknown";
+
+function detectCarrier(flightNumber: string): Carrier {
+  const code = flightNumber.toUpperCase().trim();
+  if (code === "FR" || code.startsWith("FR")) return "ryanair";
+  if (code === "W6" || code.startsWith("W6")) return "wizzair";
+  return "unknown";
+}
+
+function carrierLabel(c: Carrier): string {
+  if (c === "ryanair") return "Ryanair";
+  if (c === "wizzair") return "Wizz Air";
+  return "airline";
+}
+
 export function TripCard({
   trip,
   rank,
@@ -16,7 +31,9 @@ export function TripCard({
 }) {
   const checkIn = trip.flight.outbound.departureTime.slice(0, 10);
   const checkOut = trip.flight.inbound.departureTime.slice(0, 10);
-  const ryanairLink = buildRyanairLink(trip);
+  const carrier = detectCarrier(trip.flight.outbound.flightNumber);
+  const bookingLink = buildBookingLink(trip, carrier);
+  const carrierName = carrierLabel(carrier);
 
   return (
     <Card className="overflow-hidden">
@@ -58,6 +75,11 @@ export function TripCard({
           <div className="space-y-2 rounded-md border p-3">
             <div className="flex items-center gap-2 text-sm font-medium">
               <Plane className="size-4 text-primary" /> Flight
+              {carrier !== "unknown" && (
+                <Badge variant="outline" className="ml-1">
+                  {carrierName}
+                </Badge>
+              )}
             </div>
             <div className="text-sm text-muted-foreground">
               <div>
@@ -72,13 +94,9 @@ export function TripCard({
                 round-trip
               </div>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              asChild
-            >
-              <a href={ryanairLink} target="_blank" rel="noreferrer">
-                Book on Ryanair
+            <Button variant="outline" size="sm" asChild>
+              <a href={bookingLink} target="_blank" rel="noreferrer">
+                Book on {carrierName === "airline" ? "Ryanair" : carrierName}
               </a>
             </Button>
           </div>
@@ -177,4 +195,22 @@ function buildRyanairLink(trip: TripOption): string {
     isExactDate: "true",
   });
   return `https://www.ryanair.com/en/en/fare-finder?${params.toString()}`;
+}
+
+function buildWizzairLink(trip: TripOption): string {
+  const params = new URLSearchParams({
+    departureStation: trip.flight.outbound.origin,
+    arrivalStation: trip.flight.outbound.destination,
+    departureDate: trip.flight.outbound.departureTime.slice(0, 10),
+    returnDate: trip.flight.inbound.departureTime.slice(0, 10),
+    adults: "1",
+    children: "0",
+    infants: "0",
+  });
+  return `https://wizzair.com/en-gb/flights/fare-finder?${params.toString()}`;
+}
+
+function buildBookingLink(trip: TripOption, carrier: Carrier): string {
+  if (carrier === "wizzair") return buildWizzairLink(trip);
+  return buildRyanairLink(trip);
 }
