@@ -88,3 +88,50 @@ export function pickTop5DistinctDestinations(
   }
   return out;
 }
+
+/**
+ * Pick a varied set of trip candidates so the user can compare
+ * different (destination, duration) combinations side-by-side.
+ *
+ * Per destination: keep up to maxPerDest cheapest trips, each with a
+ * distinct night count (so 7n + 10n + 14n, not three 7n trips).
+ * Globally: cap at maxTotal, ordered by total price.
+ */
+export function pickTopTrips(
+  candidates: RouteCandidate[],
+  maxTotal = 10,
+  maxPerDest = 3,
+): RouteCandidate[] {
+  const byDest = new Map<string, RouteCandidate[]>();
+  for (const c of candidates) {
+    if (!byDest.has(c.destinationIata)) byDest.set(c.destinationIata, []);
+    byDest.get(c.destinationIata)!.push(c);
+  }
+
+  const perDestPicked: RouteCandidate[] = [];
+  for (const [, arr] of byDest) {
+    arr.sort((a, b) => a.rt.totalPrice - b.rt.totalPrice);
+    const seenNights = new Set<number>();
+    let kept = 0;
+    for (const c of arr) {
+      const n = nightsOfCandidate(c);
+      if (seenNights.has(n)) continue;
+      seenNights.add(n);
+      perDestPicked.push(c);
+      kept += 1;
+      if (kept >= maxPerDest) break;
+    }
+  }
+
+  return perDestPicked
+    .sort((a, b) => a.rt.totalPrice - b.rt.totalPrice)
+    .slice(0, maxTotal);
+}
+
+function nightsOfCandidate(c: RouteCandidate): number {
+  const a = c.rt.outbound.departureTime.slice(0, 10);
+  const b = c.rt.inbound.departureTime.slice(0, 10);
+  return Math.round(
+    (new Date(b).getTime() - new Date(a).getTime()) / 86400000,
+  );
+}

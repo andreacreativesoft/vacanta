@@ -7,7 +7,7 @@ import { createLogger } from "@/lib/logger";
 import { mockDestinationsForCountries, mockCheapestPerDay } from "./mock";
 import {
   generateValidPairs,
-  pickTop5DistinctDestinations,
+  pickTopTrips,
   type RouteCandidate,
 } from "./pairing";
 import { countryName } from "@/lib/airports/countries";
@@ -65,7 +65,9 @@ export type StepResult = {
 
 const ROUTES_PER_CHUNK = 6; // ~5-8s per chunk
 const HOTELS_PER_CHUNK = 2;
-const MAX_TRIPS_PER_ROUTE = 6;
+const MAX_TRIPS_PER_ROUTE = 12; // bigger pool so picker can diversify by duration
+const MAX_TOTAL_TRIPS = 10; // up from 5; lets the user compare durations
+const MAX_TRIPS_PER_DESTINATION = 3;
 
 function forceMock(): boolean {
   return process.env.MOCK_SEARCH === "1";
@@ -155,6 +157,7 @@ async function stepPriceRoutes(
             currency: input.currency,
             minDays: input.minDays,
             maxDays: input.maxDays,
+            airlineWhitelist: ["FR", "W6"], // Ryanair + Wizz Air only
           });
           if (rts.length > 0) state.hadRealFlightData = true;
         } catch (e) {
@@ -221,7 +224,11 @@ async function stepPriceRoutes(
     }
   }
 
-  const top = pickTop5DistinctDestinations(candidates);
+  const top = pickTopTrips(
+    candidates,
+    MAX_TOTAL_TRIPS,
+    MAX_TRIPS_PER_DESTINATION,
+  );
   state.topCandidates = top;
   state.hotelCursor = 0;
   state.phase = state.topCandidates.length > 0 ? "hotels" : "complete";

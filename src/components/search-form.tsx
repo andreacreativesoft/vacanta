@@ -35,21 +35,27 @@ export function SearchForm() {
   const router = useRouter();
   const [submitting, setSubmitting] = React.useState(false);
 
-  const [origins, setOrigins] = React.useState<string[]>(["OTP"]);
+  const [origins, setOrigins] = React.useState<string[]>([
+    "OTP",
+    "GHV",
+    "SBZ",
+  ]);
   const [destinations, setDestinations] = React.useState<string[]>(["GR", "CY"]);
   const [dateStart, setDateStart] = React.useState(todayPlus(60));
   const [dateEnd, setDateEnd] = React.useState(todayPlus(120));
   const [minDays, setMinDays] = React.useState(7);
   const [maxDays, setMaxDays] = React.useState(10);
-  const [adults, setAdults] = React.useState(2);
-  const [children, setChildren] = React.useState<ChildEntry[]>([]);
+  const [adults, setAdults] = React.useState(3);
+  const [children, setChildren] = React.useState<ChildEntry[]>([
+    { id: "default-child", age: 12 },
+  ]);
   const [rooms, setRooms] = React.useState<RoomEntry[]>([
-    { adults: 2, children: 0 },
+    { adults: 3, children: 1 },
   ]);
   const [pool, setPool] = React.useState(true);
   const [allInclusive, setAllInclusive] = React.useState(false);
   const [maxBeach, setMaxBeach] = React.useState<number | "">(500);
-  const [minRating, setMinRating] = React.useState<number | "">("");
+  const [minRating, setMinRating] = React.useState<number | "">(7);
   const [maxBudget, setMaxBudget] = React.useState<number | "">("");
   const [currency, setCurrency] = React.useState<"EUR" | "RON" | "USD">("EUR");
   const [label, setLabel] = React.useState("");

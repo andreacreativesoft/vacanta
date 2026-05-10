@@ -36,12 +36,17 @@ type MonthMatrixResponse = {
  *
  * Endpoint: /v2/prices/month-matrix
  * Docs: https://support.travelpayouts.com/hc/en-us/articles/203956083
+ *
+ * If airlineWhitelist is provided, only results whose airline IATA code is
+ * in the list are kept. Items with missing airline codes are dropped when
+ * a whitelist is active (so legacy carriers don't sneak through).
  */
 export async function fetchRoundTripsForRoute(args: {
   origin: string;
   destination: string;
   monthIso: string; // 'YYYY-MM-01'
   currency: Currency;
+  airlineWhitelist?: string[];
 }): Promise<FlightRoundTrip[]> {
   const token = process.env.TRAVELPAYOUTS_TOKEN;
   if (!token) return [];
@@ -66,6 +71,8 @@ export async function fetchRoundTripsForRoute(args: {
     const data = (await res.json()) as MonthMatrixResponse;
     if (!data.success || !Array.isArray(data.data)) return [];
 
+    const whitelist = args.airlineWhitelist?.map((a) => a.toUpperCase());
+
     const trips: FlightRoundTrip[] = data.data
       .filter(
         (item) =>
@@ -74,6 +81,11 @@ export async function fetchRoundTripsForRoute(args: {
           typeof item.value === "number" &&
           item.value > 0,
       )
+      .filter((item) => {
+        if (!whitelist || whitelist.length === 0) return true;
+        if (!item.airline) return false;
+        return whitelist.includes(item.airline.toUpperCase());
+      })
       .map((item) => ({
         outbound: {
           flightNumber: item.airline ?? "",
@@ -111,6 +123,7 @@ export async function fetchRoundTripsForWindow(args: {
   currency: Currency;
   minDays: number;
   maxDays: number;
+  airlineWhitelist?: string[];
 }): Promise<FlightRoundTrip[]> {
   const months = enumerateMonths(args.dateStartIso, args.dateEndIso);
   const all: FlightRoundTrip[] = [];
@@ -121,6 +134,7 @@ export async function fetchRoundTripsForWindow(args: {
         destination: args.destination,
         monthIso: month,
         currency: args.currency,
+        airlineWhitelist: args.airlineWhitelist,
       });
       all.push(...batch);
     } catch (e) {

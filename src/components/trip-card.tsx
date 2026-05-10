@@ -43,6 +43,13 @@ export function TripCard({
               {formatPrice(trip.totalPrice, trip.currency)}
             </div>
             <div className="text-xs text-muted-foreground">total</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {formatPrice(
+                Math.round(trip.totalPrice / Math.max(1, trip.nights)),
+                trip.currency,
+              )}
+              /night
+            </div>
           </div>
         </div>
       </CardHeader>

@@ -34,10 +34,8 @@ export const SUPPORTED_COUNTRIES: CountryDef[] = [
 
 export const SUPPORTED_ORIGINS = [
   { iata: "OTP", city: "Bucharest" },
-  { iata: "CLJ", city: "Cluj-Napoca" },
+  { iata: "GHV", city: "Brașov" },
   { iata: "SBZ", city: "Sibiu" },
-  { iata: "TSR", city: "Timișoara" },
-  { iata: "BCM", city: "Bacău" },
 ];
 
 export function countryName(code: string): string {

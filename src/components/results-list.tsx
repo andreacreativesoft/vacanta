@@ -13,11 +13,21 @@ import {
 } from "@/components/ui/select";
 import type { TripOption } from "@/types";
 
-type SortKey = "price-asc" | "price-desc" | "date-asc" | "date-desc";
+type SortKey =
+  | "price-asc"
+  | "price-desc"
+  | "date-asc"
+  | "date-desc"
+  | "nights-asc"
+  | "nights-desc"
+  | "per-night";
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: "price-asc", label: "Price: low → high" },
-  { value: "price-desc", label: "Price: high → low" },
+  { value: "price-asc", label: "Total: low → high" },
+  { value: "price-desc", label: "Total: high → low" },
+  { value: "per-night", label: "Per night: low → high" },
+  { value: "nights-asc", label: "Nights: short → long" },
+  { value: "nights-desc", label: "Nights: long → short" },
   { value: "date-asc", label: "Departure: earliest" },
   { value: "date-desc", label: "Departure: latest" },
 ];
@@ -40,6 +50,14 @@ function sortTrips(trips: TripOption[], key: SortKey): TripOption[] {
         b.flight.outbound.departureTime.localeCompare(
           a.flight.outbound.departureTime,
         ),
+      );
+    case "nights-asc":
+      return out.sort((a, b) => a.nights - b.nights);
+    case "nights-desc":
+      return out.sort((a, b) => b.nights - a.nights);
+    case "per-night":
+      return out.sort(
+        (a, b) => a.totalPrice / a.nights - b.totalPrice / b.nights,
       );
   }
 }
