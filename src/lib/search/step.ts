@@ -63,8 +63,8 @@ export type StepResult = {
   label: string;
 };
 
-const ROUTES_PER_CHUNK = 3; // tighter to fit Vercel 10s
-const HOTELS_PER_CHUNK = 2;
+const ROUTES_PER_CHUNK = 2; // tight; per-fetch timeouts also bound chunk time
+const HOTELS_PER_CHUNK = 1;
 const MAX_TRIPS_PER_ROUTE = 6;
 const MAX_TOTAL_TRIPS = 10;
 const MAX_TRIPS_PER_DESTINATION = 3;

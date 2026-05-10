@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createLogger } from "@/lib/logger";
-import { withRetry } from "@/lib/retry";
+import { fetchWithTimeout, withRetry } from "@/lib/retry";
 import type { FlightRoundTrip, Currency } from "@/types";
 
 const log = createLogger("travelpayouts-flights");
@@ -61,7 +61,10 @@ export async function fetchRoundTripsForRoute(args: {
       show_to_affiliates: "true",
     });
     const url = `${BASE}/v2/prices/month-matrix?${params.toString()}`;
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetchWithTimeout(url, {
+      cache: "no-store",
+      timeoutMs: 4000,
+    });
     if (!res.ok) {
       log.warn(
         `month-matrix ${args.origin}-${args.destination} ${args.monthIso}: ${res.status}`,

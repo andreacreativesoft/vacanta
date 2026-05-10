@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createLogger } from "@/lib/logger";
-import { withRetry } from "@/lib/retry";
+import { fetchWithTimeout, withRetry } from "@/lib/retry";
 import { daysBetween } from "@/lib/search/pairing";
 import type { HotelOption } from "@/types";
 import type { HotelSearchInput } from "./types";
@@ -72,7 +72,10 @@ async function fetchHotellook(input: HotelSearchInput): Promise<HotelOption[]> {
   });
 
   const url = `${HOTELLOOK_BASE}/cache.json?${params.toString()}`;
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await fetchWithTimeout(url, {
+    cache: "no-store",
+    timeoutMs: 5000,
+  });
   if (!res.ok) {
     throw new HotellookError(
       `Hotellook returned ${res.status} ${res.statusText}`,

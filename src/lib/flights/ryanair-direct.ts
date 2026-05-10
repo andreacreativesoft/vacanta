@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createLogger } from "@/lib/logger";
-import { withRetry } from "@/lib/retry";
+import { fetchWithTimeout, withRetry } from "@/lib/retry";
 import type { Currency, FlightRoundTrip } from "@/types";
 
 const log = createLogger("ryanair-direct");
@@ -61,8 +61,9 @@ export async function fetchRyanairRoundTrips(args: {
   const url = `${FARES_BASE}?${params.toString()}`;
 
   return withRetry(async () => {
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       cache: "no-store",
+      timeoutMs: 4000,
       headers: {
         accept: "application/json",
         "user-agent":
