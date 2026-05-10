@@ -1,24 +1,16 @@
 import "server-only";
 
-import {
-  getCheapestPerDay,
-  getDestinationsFromOrigin,
-} from "@/lib/ryanair/client";
-import { resolveAirportsForCountries } from "@/lib/ryanair/routes";
 import { searchHotels } from "@/lib/hotels/hotellook";
 import { pickBestHotel } from "@/lib/hotels/filters";
+import { fetchRoundTripsForWindow } from "@/lib/flights/travelpayouts";
 import { createLogger } from "@/lib/logger";
-import {
-  mockDestinationsForCountries,
-  mockCheapestPerDay,
-} from "./mock";
+import { mockDestinationsForCountries, mockCheapestPerDay } from "./mock";
 import {
   generateValidPairs,
   pickTop5DistinctDestinations,
   type RouteCandidate,
 } from "./pairing";
 import { countryName } from "@/lib/airports/countries";
-import type { AirportInfo } from "@/lib/ryanair/types";
 import type {
   FlightRoundTrip,
   HotelOption,
@@ -27,8 +19,6 @@ import type {
 } from "@/types";
 
 const log = createLogger("step");
-
-type Mode = "real" | "mock";
 
 export type Phase =
   | "init"
@@ -39,15 +29,15 @@ export type Phase =
   | "error";
 
 export type SnapshotState = {
-  mode: Mode;
   phase: Phase;
   routes: SerializedRoute[];
   routeCursor: number; // next route index to price
-  fareMap: Record<string, FareEntry>;
+  routeRoundTrips: Record<string, SerializedRoundTrip[]>;
   topCandidates: SerializedTopCandidate[];
   hotelCursor: number; // next top-candidate index to fetch hotels for
   trips: TripOption[];
   message?: string;
+  hadRealFlightData?: boolean;
 };
 
 type SerializedRoute = {
@@ -56,8 +46,7 @@ type SerializedRoute = {
   city: string;
   country: string;
 };
-type FareEntry = { out: DailyFareLite[]; back: DailyFareLite[] };
-type DailyFareLite = { date: string; price: number; currency: string };
+type SerializedRoundTrip = FlightRoundTrip;
 type SerializedTopCandidate = {
   origin: string;
   destinationIata: string;
@@ -74,22 +63,20 @@ export type StepResult = {
   label: string;
 };
 
-const ROUTES_PER_CHUNK = 6; // ~5-8s per chunk in real mode
+const ROUTES_PER_CHUNK = 6; // ~5-8s per chunk
 const HOTELS_PER_CHUNK = 2;
+const MAX_TRIPS_PER_ROUTE = 6;
 
-function shouldUseMock(): boolean {
-  if (process.env.MOCK_SEARCH === "1") return true;
-  if (process.env.MOCK_SEARCH === "0") return false;
-  return false;
+function forceMock(): boolean {
+  return process.env.MOCK_SEARCH === "1";
 }
 
 export function initialState(): SnapshotState {
   return {
-    mode: shouldUseMock() ? "mock" : "real",
     phase: "init",
     routes: [],
     routeCursor: 0,
-    fareMap: {},
+    routeRoundTrips: {},
     topCandidates: [],
     hotelCursor: 0,
     trips: [],
@@ -101,7 +88,6 @@ export async function step(
   prev: SnapshotState,
 ): Promise<StepResult> {
   const state = { ...prev };
-
   switch (state.phase) {
     case "init":
     case "routes":
@@ -119,72 +105,22 @@ async function stepResolveRoutes(
   input: SearchInput,
   state: SnapshotState,
 ): Promise<StepResult> {
-  let destAirports: AirportInfo[];
-  let validRoutes: SerializedRoute[];
-
-  try {
-    if (state.mode === "mock") {
-      destAirports = mockDestinationsForCountries(input.destinationCountries);
-      validRoutes = input.origins.flatMap((o) =>
-        destAirports.map((d) => ({
-          origin: o,
-          iata: d.iata,
-          city: d.city,
-          country: d.country,
-        })),
-      );
-    } else {
-      destAirports = await resolveAirportsForCountries(
-        input.destinationCountries,
-      );
-      validRoutes = [];
-      for (const origin of input.origins) {
-        const reachable = new Set(await getDestinationsFromOrigin(origin));
-        for (const dest of destAirports) {
-          if (reachable.has(dest.iata)) {
-            validRoutes.push({
-              origin,
-              iata: dest.iata,
-              city: dest.city,
-              country: dest.country,
-            });
-          }
-        }
-      }
-    }
-  } catch (e) {
-    log.warn("real route resolution failed, falling back to mock", e);
-    destAirports = mockDestinationsForCountries(input.destinationCountries);
-    validRoutes = input.origins.flatMap((o) =>
-      destAirports.map((d) => ({
-        origin: o,
-        iata: d.iata,
-        city: d.city,
-        country: d.country,
-      })),
-    );
-    state.mode = "mock";
-  }
-
-  // Fallback when real returns 0 routes (e.g. Ryanair endpoint returned empty).
-  if (state.mode === "real" && validRoutes.length === 0) {
-    log.warn("real route resolution returned 0 routes — falling back to mock");
-    destAirports = mockDestinationsForCountries(input.destinationCountries);
-    validRoutes = input.origins.flatMap((o) =>
-      destAirports.map((d) => ({
-        origin: o,
-        iata: d.iata,
-        city: d.city,
-        country: d.country,
-      })),
-    );
-    state.mode = "mock";
-  }
+  // We always start from the static destination list filtered by countries.
+  // Travelpayouts probes will tell us per-route whether Aviasales has data.
+  const destAirports = mockDestinationsForCountries(input.destinationCountries);
+  const validRoutes: SerializedRoute[] = input.origins.flatMap((origin) =>
+    destAirports.map((d) => ({
+      origin,
+      iata: d.iata,
+      city: d.city,
+      country: d.country,
+    })),
+  );
 
   state.routes = validRoutes;
   state.routeCursor = 0;
   state.phase = validRoutes.length > 0 ? "pricing" : "complete";
-  state.message = `Found ${validRoutes.length} routes`;
+  state.message = `Probing ${validRoutes.length} routes`;
 
   return {
     state,
@@ -207,80 +143,53 @@ async function stepPriceRoutes(
   await Promise.all(
     slice.map(async (route) => {
       const key = `${route.origin}-${route.iata}`;
-      try {
-        if (state.mode === "mock") {
-          state.fareMap[key] = {
-            out: mockCheapestPerDay(
-              route.origin,
-              route.iata,
-              input.dateWindowStart,
-              input.dateWindowEnd,
-              input.currency,
-            ),
-            back: mockCheapestPerDay(
-              route.iata,
-              route.origin,
-              input.dateWindowStart,
-              input.dateWindowEnd,
-              input.currency,
-            ),
-          };
-        } else {
-          const [out, back] = await Promise.all([
-            getCheapestPerDay(
-              route.origin,
-              route.iata,
-              input.dateWindowStart,
-              input.dateWindowEnd,
-            ),
-            getCheapestPerDay(
-              route.iata,
-              route.origin,
-              input.dateWindowStart,
-              input.dateWindowEnd,
-            ),
-          ]);
-          // Fallback to mock fares per-route if real returned nothing.
-          if (out.length === 0 && back.length === 0) {
-            state.fareMap[key] = {
-              out: mockCheapestPerDay(
-                route.origin,
-                route.iata,
-                input.dateWindowStart,
-                input.dateWindowEnd,
-                input.currency,
-              ),
-              back: mockCheapestPerDay(
-                route.iata,
-                route.origin,
-                input.dateWindowStart,
-                input.dateWindowEnd,
-                input.currency,
-              ),
-            };
-          } else {
-            state.fareMap[key] = { out, back };
-          }
+      let rts: FlightRoundTrip[] = [];
+
+      if (!forceMock()) {
+        try {
+          rts = await fetchRoundTripsForWindow({
+            origin: route.origin,
+            destination: route.iata,
+            dateStartIso: input.dateWindowStart,
+            dateEndIso: input.dateWindowEnd,
+            currency: input.currency,
+            minDays: input.minDays,
+            maxDays: input.maxDays,
+          });
+          if (rts.length > 0) state.hadRealFlightData = true;
+        } catch (e) {
+          log.warn(`travelpayouts ${key} failed, using mock`, e);
         }
-      } catch (e) {
-        log.warn(`fares ${key} failed, using mock fallback`, e);
-        state.fareMap[key] = {
-          out: mockCheapestPerDay(
-            route.origin,
-            route.iata,
-            input.dateWindowStart,
-            input.dateWindowEnd,
-            input.currency,
-          ),
-          back: mockCheapestPerDay(
-            route.iata,
-            route.origin,
-            input.dateWindowStart,
-            input.dateWindowEnd,
-            input.currency,
-          ),
-        };
       }
+
+      if (rts.length === 0) {
+        // Mock fallback per-route: synthesize using out/back daily fares + pairing.
+        const outFares = mockCheapestPerDay(
+          route.origin,
+          route.iata,
+          input.dateWindowStart,
+          input.dateWindowEnd,
+          input.currency,
+        );
+        const backFares = mockCheapestPerDay(
+          route.iata,
+          route.origin,
+          input.dateWindowStart,
+          input.dateWindowEnd,
+          input.currency,
+        );
+        rts = generateValidPairs(
+          route.origin,
+          route.iata,
+          outFares,
+          backFares,
+          input.minDays,
+          input.maxDays,
+        );
+      }
+
+      // Keep only the cheapest few per route to bound state size.
+      state.routeRoundTrips[key] = rts.slice(0, MAX_TRIPS_PER_ROUTE);
     }),
   );
 
@@ -297,21 +206,11 @@ async function stepPriceRoutes(
     };
   }
 
-  // Pricing finished — compute top 5 candidates and move to hotels
+  // Pricing finished — pick top 5 distinct cheapest destinations
   const candidates: RouteCandidate[] = [];
   for (const route of state.routes) {
     const key = `${route.origin}-${route.iata}`;
-    const fare = state.fareMap[key];
-    if (!fare) continue;
-    const pairs = generateValidPairs(
-      route.origin,
-      route.iata,
-      fare.out,
-      fare.back,
-      input.minDays,
-      input.maxDays,
-    );
-    for (const rt of pairs.slice(0, 6)) {
+    for (const rt of state.routeRoundTrips[key] ?? []) {
       candidates.push({
         origin: route.origin,
         destinationIata: route.iata,
@@ -323,13 +222,7 @@ async function stepPriceRoutes(
   }
 
   const top = pickTop5DistinctDestinations(candidates);
-  state.topCandidates = top.map((c) => ({
-    origin: c.origin,
-    destinationIata: c.destinationIata,
-    destinationCity: c.destinationCity,
-    destinationCountry: c.destinationCountry,
-    rt: c.rt,
-  }));
+  state.topCandidates = top;
   state.hotelCursor = 0;
   state.phase = state.topCandidates.length > 0 ? "hotels" : "complete";
   state.message = `${state.topCandidates.length} top destinations`;
@@ -400,7 +293,6 @@ async function stepFetchHotels(
     };
   }
 
-  // All hotels done — finalize
   state.trips.sort((a, b) => a.totalPrice - b.totalPrice);
   if (input.filters.maxBudgetTotal) {
     state.trips = state.trips.filter(
