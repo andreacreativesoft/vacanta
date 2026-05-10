@@ -9,9 +9,17 @@ loadEnvFile(".env");
 const remote = process.env.TURSO_DATABASE_URL;
 const dbPath = process.env.DATABASE_URL ?? "./data/vacation-finder.db";
 
-const url = remote
-  ? remote
-  : `file:${path.isAbsolute(dbPath) ? dbPath : path.resolve(process.cwd(), dbPath)}`;
+const absDbPath = path.isAbsolute(dbPath)
+  ? dbPath
+  : path.resolve(process.cwd(), dbPath);
+
+if (!remote) {
+  // libsql won't create the parent directory itself; do it for them.
+  const dir = path.dirname(absDbPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+const url = remote ? remote : `file:${absDbPath}`;
 
 export default {
   schema: "./src/lib/db/schema.ts",
