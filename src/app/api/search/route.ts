@@ -4,43 +4,55 @@ import { ZodError } from "zod";
 import { searchInputSchema } from "@/lib/validation";
 import { createSearch } from "@/lib/db/queries";
 import { startSnapshot } from "@/lib/search/runner";
+import { createLogger } from "@/lib/logger";
 import type { SearchInput } from "@/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 10;
 
-export async function POST(request: Request) {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { ok: false, error: "Invalid JSON" },
-      { status: 400 },
-    );
-  }
+const log = createLogger("api:search");
 
-  let parsed;
+export async function POST(request: Request) {
   try {
-    parsed = searchInputSchema.parse(body);
-  } catch (e) {
-    if (e instanceof ZodError) {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
       return NextResponse.json(
-        { ok: false, error: "Validation failed", issues: e.issues },
+        { ok: false, error: "Invalid JSON" },
         { status: 400 },
       );
     }
-    throw e;
+
+    let parsed;
+    try {
+      parsed = searchInputSchema.parse(body);
+    } catch (e) {
+      if (e instanceof ZodError) {
+        return NextResponse.json(
+          { ok: false, error: "Validation failed", issues: e.issues },
+          { status: 400 },
+        );
+      }
+      throw e;
+    }
+
+    const { label, ...rest } = parsed;
+    const input: SearchInput = rest;
+    const search = await createSearch(input, label);
+    const snapshot = await startSnapshot(search.id);
+
+    return NextResponse.json({
+      ok: true,
+      searchId: search.id,
+      snapshotId: snapshot.id,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    log.error("search handler crashed", err);
+    return NextResponse.json(
+      { ok: false, error: message },
+      { status: 500 },
+    );
   }
-
-  const { label, ...rest } = parsed;
-  const input: SearchInput = rest;
-  const search = await createSearch(input, label);
-  const snapshot = await startSnapshot(search.id);
-
-  return NextResponse.json({
-    ok: true,
-    searchId: search.id,
-    snapshotId: snapshot.id,
-  });
 }

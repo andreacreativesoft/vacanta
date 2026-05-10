@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createLogger } from "@/lib/logger";
-import { withRetry } from "@/lib/ryanair/client";
+import { withRetry } from "@/lib/retry";
 import { daysBetween } from "@/lib/search/pairing";
 import type { HotelOption } from "@/types";
 import type { HotelSearchInput } from "./types";

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createLogger } from "@/lib/logger";
-import { withRetry } from "@/lib/ryanair/client";
+import { withRetry } from "@/lib/retry";
 import type { FlightRoundTrip, Currency } from "@/types";
 
 const log = createLogger("travelpayouts-flights");
