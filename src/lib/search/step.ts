@@ -166,6 +166,21 @@ async function stepResolveRoutes(
     state.mode = "mock";
   }
 
+  // Fallback when real returns 0 routes (e.g. Ryanair endpoint returned empty).
+  if (state.mode === "real" && validRoutes.length === 0) {
+    log.warn("real route resolution returned 0 routes — falling back to mock");
+    destAirports = mockDestinationsForCountries(input.destinationCountries);
+    validRoutes = input.origins.flatMap((o) =>
+      destAirports.map((d) => ({
+        origin: o,
+        iata: d.iata,
+        city: d.city,
+        country: d.country,
+      })),
+    );
+    state.mode = "mock";
+  }
+
   state.routes = validRoutes;
   state.routeCursor = 0;
   state.phase = validRoutes.length > 0 ? "pricing" : "complete";
@@ -225,11 +240,46 @@ async function stepPriceRoutes(
               input.dateWindowEnd,
             ),
           ]);
-          state.fareMap[key] = { out, back };
+          // Fallback to mock fares per-route if real returned nothing.
+          if (out.length === 0 && back.length === 0) {
+            state.fareMap[key] = {
+              out: mockCheapestPerDay(
+                route.origin,
+                route.iata,
+                input.dateWindowStart,
+                input.dateWindowEnd,
+                input.currency,
+              ),
+              back: mockCheapestPerDay(
+                route.iata,
+                route.origin,
+                input.dateWindowStart,
+                input.dateWindowEnd,
+                input.currency,
+              ),
+            };
+          } else {
+            state.fareMap[key] = { out, back };
+          }
         }
       } catch (e) {
-        log.warn(`fares ${key} failed`, e);
-        state.fareMap[key] = { out: [], back: [] };
+        log.warn(`fares ${key} failed, using mock fallback`, e);
+        state.fareMap[key] = {
+          out: mockCheapestPerDay(
+            route.origin,
+            route.iata,
+            input.dateWindowStart,
+            input.dateWindowEnd,
+            input.currency,
+          ),
+          back: mockCheapestPerDay(
+            route.iata,
+            route.origin,
+            input.dateWindowStart,
+            input.dateWindowEnd,
+            input.currency,
+          ),
+        };
       }
     }),
   );
