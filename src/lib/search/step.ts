@@ -32,7 +32,7 @@ export type SnapshotState = {
   phase: Phase;
   routes: SerializedRoute[];
   routeCursor: number; // next route index to price
-  routeRoundTrips: Record<string, SerializedRoundTrip[]>;
+  candidatesPool: SerializedTopCandidate[]; // running top-N, bounded
   topCandidates: SerializedTopCandidate[];
   hotelCursor: number; // next top-candidate index to fetch hotels for
   trips: TripOption[];
@@ -46,7 +46,6 @@ type SerializedRoute = {
   city: string;
   country: string;
 };
-type SerializedRoundTrip = FlightRoundTrip;
 type SerializedTopCandidate = {
   origin: string;
   destinationIata: string;
@@ -63,11 +62,12 @@ export type StepResult = {
   label: string;
 };
 
-const ROUTES_PER_CHUNK = 6; // ~5-8s per chunk
+const ROUTES_PER_CHUNK = 3; // tighter to fit Vercel 10s
 const HOTELS_PER_CHUNK = 2;
-const MAX_TRIPS_PER_ROUTE = 12; // bigger pool so picker can diversify by duration
-const MAX_TOTAL_TRIPS = 10; // up from 5; lets the user compare durations
+const MAX_TRIPS_PER_ROUTE = 6;
+const MAX_TOTAL_TRIPS = 10;
 const MAX_TRIPS_PER_DESTINATION = 3;
+const POOL_BUFFER = 200; // running pool overall cap (price-sorted)
 
 function forceMock(): boolean {
   return process.env.MOCK_SEARCH === "1";
@@ -78,7 +78,7 @@ export function initialState(): SnapshotState {
     phase: "init",
     routes: [],
     routeCursor: 0,
-    routeRoundTrips: {},
+    candidatesPool: [],
     topCandidates: [],
     hotelCursor: 0,
     trips: [],
@@ -191,10 +191,23 @@ async function stepPriceRoutes(
         );
       }
 
-      // Keep only the cheapest few per route to bound state size.
-      state.routeRoundTrips[key] = rts.slice(0, MAX_TRIPS_PER_ROUTE);
+      // Add this route's top trips into the running pool.
+      const limited = rts.slice(0, MAX_TRIPS_PER_ROUTE);
+      for (const rt of limited) {
+        state.candidatesPool.push({
+          origin: route.origin,
+          destinationIata: route.iata,
+          destinationCity: route.city,
+          destinationCountry: route.country,
+          rt,
+        });
+      }
     }),
   );
+
+  // Bound the running pool: top 5 trips per destination, capped overall.
+  // Preserves diversity so the final picker can still surface distinct cities.
+  state.candidatesPool = trimPool(state.candidatesPool, 5, POOL_BUFFER);
 
   state.routeCursor += slice.length;
 
@@ -209,23 +222,8 @@ async function stepPriceRoutes(
     };
   }
 
-  // Pricing finished — pick top 5 distinct cheapest destinations
-  const candidates: RouteCandidate[] = [];
-  for (const route of state.routes) {
-    const key = `${route.origin}-${route.iata}`;
-    for (const rt of state.routeRoundTrips[key] ?? []) {
-      candidates.push({
-        origin: route.origin,
-        destinationIata: route.iata,
-        destinationCity: route.city,
-        destinationCountry: route.country,
-        rt,
-      });
-    }
-  }
-
   const top = pickTopTrips(
-    candidates,
+    state.candidatesPool as RouteCandidate[],
     MAX_TOTAL_TRIPS,
     MAX_TRIPS_PER_DESTINATION,
   );
@@ -321,4 +319,24 @@ function daysBetween(a: string, b: string): number {
   const ad = new Date(a).getTime();
   const bd = new Date(b).getTime();
   return Math.round((bd - ad) / 86400000);
+}
+
+function trimPool(
+  pool: SerializedTopCandidate[],
+  maxPerDest: number,
+  maxTotal: number,
+): SerializedTopCandidate[] {
+  const byDest = new Map<string, SerializedTopCandidate[]>();
+  for (const c of pool) {
+    const arr = byDest.get(c.destinationIata) ?? [];
+    arr.push(c);
+    byDest.set(c.destinationIata, arr);
+  }
+  const trimmed: SerializedTopCandidate[] = [];
+  for (const [, arr] of byDest) {
+    arr.sort((a, b) => a.rt.totalPrice - b.rt.totalPrice);
+    trimmed.push(...arr.slice(0, maxPerDest));
+  }
+  trimmed.sort((a, b) => a.rt.totalPrice - b.rt.totalPrice);
+  return trimmed.slice(0, maxTotal);
 }
