@@ -4,13 +4,10 @@ import { searchHotels } from "@/lib/hotels/hotellook";
 import { pickBestHotel } from "@/lib/hotels/filters";
 import { fetchRoundTripsForWindow } from "@/lib/flights/travelpayouts";
 import { fetchRyanairRoundTrips } from "@/lib/flights/ryanair-direct";
+import { getDestinationsFromOrigin } from "@/lib/ryanair/client";
 import { createLogger } from "@/lib/logger";
-import { mockDestinationsForCountries, mockCheapestPerDay } from "./mock";
-import {
-  generateValidPairs,
-  pickTopTrips,
-  type RouteCandidate,
-} from "./pairing";
+import { airportsForCountries } from "./airports";
+import { pickTopTrips, type RouteCandidate } from "./pairing";
 import { countryName } from "@/lib/airports/countries";
 import type {
   FlightRoundTrip,
@@ -38,7 +35,6 @@ export type SnapshotState = {
   hotelCursor: number; // next top-candidate index to fetch hotels for
   trips: TripOption[];
   message?: string;
-  hadRealFlightData?: boolean;
 };
 
 type SerializedRoute = {
@@ -69,10 +65,6 @@ const MAX_TRIPS_PER_ROUTE = 6;
 const MAX_TOTAL_TRIPS = 10;
 const MAX_TRIPS_PER_DESTINATION = 3;
 const POOL_BUFFER = 200; // running pool overall cap (price-sorted)
-
-function forceMock(): boolean {
-  return process.env.MOCK_SEARCH === "1";
-}
 
 export function initialState(): SnapshotState {
   return {
@@ -108,17 +100,30 @@ async function stepResolveRoutes(
   input: SearchInput,
   state: SnapshotState,
 ): Promise<StepResult> {
-  // We always start from the static destination list filtered by countries.
-  // Travelpayouts probes will tell us per-route whether Aviasales has data.
-  const destAirports = mockDestinationsForCountries(input.destinationCountries);
-  const validRoutes: SerializedRoute[] = input.origins.flatMap((origin) =>
-    destAirports.map((d) => ({
-      origin,
-      iata: d.iata,
-      city: d.city,
-      country: d.country,
-    })),
-  );
+  // Candidate destinations in the requested countries, then intersect with
+  // each origin's actual reachable set from Ryanair so we never probe routes
+  // the airline doesn't fly.
+  const destAirports = airportsForCountries(input.destinationCountries);
+  const validRoutes: SerializedRoute[] = [];
+  for (const origin of input.origins) {
+    let reachable: Set<string>;
+    try {
+      reachable = new Set(await getDestinationsFromOrigin(origin));
+    } catch (e) {
+      log.warn(`getDestinations(${origin}) failed; dropping origin`, e);
+      continue;
+    }
+    for (const d of destAirports) {
+      if (reachable.has(d.iata)) {
+        validRoutes.push({
+          origin,
+          iata: d.iata,
+          city: d.city,
+          country: d.country,
+        });
+      }
+    }
+  }
 
   state.routes = validRoutes;
   state.routeCursor = 0;
@@ -148,84 +153,56 @@ async function stepPriceRoutes(
       const key = `${route.origin}-${route.iata}`;
       let rts: FlightRoundTrip[] = [];
 
-      if (!forceMock()) {
-        // 1. Try Ryanair's own fare-finder API first.
+      // 1. Try Ryanair's own fare-finder API first.
+      try {
+        const adults = input.passengers.filter(
+          (p) => p.type === "adult",
+        ).length;
+        const teens = input.passengers.filter((p) => p.type === "teen").length;
+        const children = input.passengers.filter(
+          (p) => p.type === "child",
+        ).length;
+        const infants = input.passengers.filter(
+          (p) => p.type === "infant",
+        ).length;
+        rts = await fetchRyanairRoundTrips({
+          origin: route.origin,
+          destination: route.iata,
+          outboundFrom: input.dateWindowStart,
+          outboundTo: input.dateWindowEnd,
+          durationFrom: input.minDays,
+          durationTo: input.maxDays,
+          adults: Math.max(1, adults),
+          teens,
+          children,
+          infants,
+          currency: input.currency,
+        });
+      } catch (e) {
+        log.warn(`ryanair direct ${key} failed`, e);
+      }
+
+      // 2. Fall back to Travelpayouts (Ryanair + Wizz, sometimes cached older prices).
+      if (rts.length === 0) {
         try {
-          const adults = input.passengers.filter(
-            (p) => p.type === "adult",
-          ).length;
-          const teens = input.passengers.filter((p) => p.type === "teen").length;
-          const children = input.passengers.filter(
-            (p) => p.type === "child",
-          ).length;
-          const infants = input.passengers.filter(
-            (p) => p.type === "infant",
-          ).length;
-          rts = await fetchRyanairRoundTrips({
+          rts = await fetchRoundTripsForWindow({
             origin: route.origin,
             destination: route.iata,
-            outboundFrom: input.dateWindowStart,
-            outboundTo: input.dateWindowEnd,
-            durationFrom: input.minDays,
-            durationTo: input.maxDays,
-            adults: Math.max(1, adults),
-            teens,
-            children,
-            infants,
+            dateStartIso: input.dateWindowStart,
+            dateEndIso: input.dateWindowEnd,
             currency: input.currency,
+            minDays: input.minDays,
+            maxDays: input.maxDays,
+            airlineWhitelist: ["FR", "W6"],
           });
         } catch (e) {
-          log.warn(`ryanair direct ${key} failed`, e);
+          log.warn(`travelpayouts ${key} failed`, e);
         }
-
-        // 2. Fall back to Travelpayouts (Ryanair + Wizz, sometimes cached older prices).
-        if (rts.length === 0) {
-          try {
-            rts = await fetchRoundTripsForWindow({
-              origin: route.origin,
-              destination: route.iata,
-              dateStartIso: input.dateWindowStart,
-              dateEndIso: input.dateWindowEnd,
-              currency: input.currency,
-              minDays: input.minDays,
-              maxDays: input.maxDays,
-              airlineWhitelist: ["FR", "W6"],
-            });
-          } catch (e) {
-            log.warn(`travelpayouts ${key} failed`, e);
-          }
-        }
-
-        if (rts.length > 0) state.hadRealFlightData = true;
       }
 
-      if (rts.length === 0) {
-        // Mock fallback per-route: synthesize using out/back daily fares + pairing.
-        const outFares = mockCheapestPerDay(
-          route.origin,
-          route.iata,
-          input.dateWindowStart,
-          input.dateWindowEnd,
-          input.currency,
-        );
-        const backFares = mockCheapestPerDay(
-          route.iata,
-          route.origin,
-          input.dateWindowStart,
-          input.dateWindowEnd,
-          input.currency,
-        );
-        rts = generateValidPairs(
-          route.origin,
-          route.iata,
-          outFares,
-          backFares,
-          input.minDays,
-          input.maxDays,
-        );
-      }
+      // No real data → drop the route. We never fabricate fares.
+      if (rts.length === 0) return;
 
-      // Add this route's top trips into the running pool.
       const limited = rts.slice(0, MAX_TRIPS_PER_ROUTE);
       for (const rt of limited) {
         state.candidatesPool.push({

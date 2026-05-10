@@ -1,7 +1,10 @@
 import type { AirportInfo } from "@/lib/ryanair/types";
-import type { DailyFare } from "./pairing";
 
-export const MOCK_DESTINATIONS: AirportInfo[] = [
+// Snapshot of low-cost-friendly destinations grouped by country. Used as the
+// candidate pool that gets intersected with each origin's actual reachable set
+// (Ryanair's getDestinations) before any pricing happens. No synthetic data —
+// every IATA listed here is a real airport served by FR/W6 from somewhere.
+export const KNOWN_AIRPORTS: AirportInfo[] = [
   // Greece
   { iata: "ATH", city: "Athens", country: "GR" },
   { iata: "SKG", city: "Thessaloniki", country: "GR" },
@@ -103,53 +106,7 @@ export const MOCK_DESTINATIONS: AirportInfo[] = [
   { iata: "AMM", city: "Amman", country: "JO" },
 ];
 
-export function mockDestinationsForCountries(
-  codes: string[],
-): AirportInfo[] {
+export function airportsForCountries(codes: string[]): AirportInfo[] {
   const set = new Set(codes.map((c) => c.toUpperCase()));
-  return MOCK_DESTINATIONS.filter((d) => set.has(d.country));
-}
-
-export function mockCheapestPerDay(
-  origin: string,
-  destination: string,
-  fromIso: string,
-  toIso: string,
-  currency = "EUR",
-): DailyFare[] {
-  const out: DailyFare[] = [];
-  const start = new Date(fromIso);
-  const end = new Date(toIso);
-  const seed = hash(`${origin}-${destination}`);
-  let s = seed || 1;
-  const next = () => {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    return s / 0xffffffff;
-  };
-
-  for (
-    let d = new Date(start);
-    d <= end;
-    d.setDate(d.getDate() + 1)
-  ) {
-    if (next() < 0.4) continue;
-    const dow = d.getDay();
-    const weekendBump = dow === 5 || dow === 6 || dow === 0 ? 25 : 0;
-    const price = 25 + Math.floor(next() * 80) + weekendBump;
-    out.push({
-      date: d.toISOString().slice(0, 10),
-      price,
-      currency,
-    });
-  }
-  return out;
-}
-
-function hash(s: string) {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = (h * 16777619) >>> 0;
-  }
-  return h;
+  return KNOWN_AIRPORTS.filter((d) => set.has(d.country));
 }

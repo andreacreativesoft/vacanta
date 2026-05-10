@@ -43,15 +43,15 @@ export async function searchHotels(
 ): Promise<HotelOption[]> {
   if (!isHotellookConfigured()) {
     log.warn(
-      `Hotellook not configured (TRAVELPAYOUTS_TOKEN missing) — using mock data for ${input.cityName ?? input.cityIata}`,
+      `Hotellook not configured (TRAVELPAYOUTS_TOKEN missing) — no hotels for ${input.cityName ?? input.cityIata}`,
     );
-    return mockHotels(input);
+    return [];
   }
   try {
     return await withRetry(() => fetchHotellook(input), 2, 1500);
   } catch (e) {
-    log.error("Hotellook fetch failed, falling back to mock", e);
-    return mockHotels(input);
+    log.error("Hotellook fetch failed", e);
+    return [];
   }
 }
 
@@ -140,60 +140,4 @@ function buildHotellookLink(args: {
     marker: args.marker,
   });
   return `https://search.hotellook.com/hotels?${params.toString()}`;
-}
-
-function mockHotels(input: HotelSearchInput): HotelOption[] {
-  const nights = Math.max(1, daysBetween(input.checkIn, input.checkOut));
-  const seed = hashString(input.cityIata + input.checkIn);
-  const rng = makeRng(seed);
-
-  const templates = [
-    { suffix: "Beach Resort", stars: 4, ai: true, pool: true, beach: 80 },
-    { suffix: "Bay Hotel", stars: 4, ai: false, pool: true, beach: 250 },
-    { suffix: "Boutique", stars: 3, ai: false, pool: false, beach: 600 },
-    { suffix: "Garden Suites", stars: 4, ai: true, pool: true, beach: 400 },
-    { suffix: "Seaview", stars: 5, ai: true, pool: true, beach: 50 },
-    { suffix: "Family Inn", stars: 3, ai: false, pool: true, beach: 800 },
-  ];
-
-  const cityWord = (input.cityName || input.cityIata).split(/[\s-]/)[0];
-
-  return templates.map((t, i) => {
-    const baseNight = 60 + Math.floor(rng() * 120);
-    const pricePerNight = baseNight + i * 15;
-    const totalPrice = pricePerNight * nights;
-    return {
-      hotelId: `mock-${input.cityIata}-${i}`,
-      name: `${cityWord} ${t.suffix}`,
-      stars: t.stars,
-      rating: 7 + Math.round(rng() * 30) / 10,
-      pricePerNight,
-      totalPrice,
-      currency: input.currency,
-      hasPool: t.pool,
-      distanceToBeachMeters: t.beach,
-      isAllInclusive: t.ai,
-      thumbnailUrl: undefined,
-      bookingDeepLink: `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(
-        `${cityWord} ${t.suffix}`,
-      )}&checkin=${input.checkIn}&checkout=${input.checkOut}`,
-    };
-  });
-}
-
-function hashString(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = (h * 16777619) >>> 0;
-  }
-  return h;
-}
-
-function makeRng(seed: number) {
-  let s = seed || 1;
-  return () => {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    return s / 0xffffffff;
-  };
 }
