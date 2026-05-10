@@ -3,6 +3,7 @@ import "server-only";
 import { searchHotels } from "@/lib/hotels/hotellook";
 import { pickBestHotel } from "@/lib/hotels/filters";
 import { fetchRoundTripsForWindow } from "@/lib/flights/travelpayouts";
+import { fetchRyanairRoundTrips } from "@/lib/flights/ryanair-direct";
 import { createLogger } from "@/lib/logger";
 import { mockDestinationsForCountries, mockCheapestPerDay } from "./mock";
 import {
@@ -148,21 +149,54 @@ async function stepPriceRoutes(
       let rts: FlightRoundTrip[] = [];
 
       if (!forceMock()) {
+        // 1. Try Ryanair's own fare-finder API first.
         try {
-          rts = await fetchRoundTripsForWindow({
+          const adults = input.passengers.filter(
+            (p) => p.type === "adult",
+          ).length;
+          const teens = input.passengers.filter((p) => p.type === "teen").length;
+          const children = input.passengers.filter(
+            (p) => p.type === "child",
+          ).length;
+          const infants = input.passengers.filter(
+            (p) => p.type === "infant",
+          ).length;
+          rts = await fetchRyanairRoundTrips({
             origin: route.origin,
             destination: route.iata,
-            dateStartIso: input.dateWindowStart,
-            dateEndIso: input.dateWindowEnd,
+            outboundFrom: input.dateWindowStart,
+            outboundTo: input.dateWindowEnd,
+            durationFrom: input.minDays,
+            durationTo: input.maxDays,
+            adults: Math.max(1, adults),
+            teens,
+            children,
+            infants,
             currency: input.currency,
-            minDays: input.minDays,
-            maxDays: input.maxDays,
-            airlineWhitelist: ["FR", "W6"], // Ryanair + Wizz Air only
           });
-          if (rts.length > 0) state.hadRealFlightData = true;
         } catch (e) {
-          log.warn(`travelpayouts ${key} failed, using mock`, e);
+          log.warn(`ryanair direct ${key} failed`, e);
         }
+
+        // 2. Fall back to Travelpayouts (Ryanair + Wizz, sometimes cached older prices).
+        if (rts.length === 0) {
+          try {
+            rts = await fetchRoundTripsForWindow({
+              origin: route.origin,
+              destination: route.iata,
+              dateStartIso: input.dateWindowStart,
+              dateEndIso: input.dateWindowEnd,
+              currency: input.currency,
+              minDays: input.minDays,
+              maxDays: input.maxDays,
+              airlineWhitelist: ["FR", "W6"],
+            });
+          } catch (e) {
+            log.warn(`travelpayouts ${key} failed`, e);
+          }
+        }
+
+        if (rts.length > 0) state.hadRealFlightData = true;
       }
 
       if (rts.length === 0) {

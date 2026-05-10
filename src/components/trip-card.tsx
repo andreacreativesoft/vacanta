@@ -159,15 +159,22 @@ export function TripCard({
 
 function buildRyanairLink(trip: TripOption): string {
   const params = new URLSearchParams({
+    originIata: trip.flight.outbound.origin,
+    destinationIata: trip.flight.outbound.destination,
+    isReturn: "true",
+    isMacDestination: "false",
+    promoCode: "null",
     adults: "1",
     teens: "0",
     children: "0",
     infants: "0",
     dateOut: trip.flight.outbound.departureTime.slice(0, 10),
     dateIn: trip.flight.inbound.departureTime.slice(0, 10),
-    originIata: trip.flight.outbound.origin,
-    destinationIata: trip.flight.outbound.destination,
-    isReturn: "true",
+    daysTrip: String(trip.nights),
+    nightsFrom: String(trip.nights),
+    nightsTo: String(trip.nights),
+    dayOfWeek: "",
+    isExactDate: "true",
   });
-  return `https://www.ryanair.com/gb/en/trip/flights/select?${params.toString()}`;
+  return `https://www.ryanair.com/en/en/fare-finder?${params.toString()}`;
 }
